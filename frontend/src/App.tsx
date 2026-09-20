@@ -200,7 +200,7 @@ export default function App() {
             isLoading={appState === 'generating_brief'}
           />
         ) : (
-          <div className="max-w-2xl mx-auto w-full px-4 sm:px-6 py-6 space-y-6 pb-4">
+          <div className="max-w-4xl mx-auto w-full px-4 sm:px-6 py-6 space-y-6 pb-4">
             {messages.map(msg => (
               <MessageBubble
                 key={msg.id}
