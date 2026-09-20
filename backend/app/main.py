@@ -82,7 +82,7 @@ if DIST_DIR.exists():
         return FileResponse(str(DIST_DIR / "favicon.svg"))
 
     # Catch-all: any non-API route returns index.html (React Router SPA)
-    @app.get("/{full_path:path}", include_in_schema=False)
+    @app.api_route("/{full_path:path}", methods=["GET", "HEAD"], include_in_schema=False)
     async def spa_fallback(full_path: str):
         index = DIST_DIR / "index.html"
         return FileResponse(str(index))
