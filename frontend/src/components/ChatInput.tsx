@@ -10,11 +10,11 @@ interface ChatInputProps {
 }
 
 const QUICK_PROMPTS = [
-  "What did I promise Raghav?",
+  'What did I promise Raghav?',
   "What's overdue?",
   "What's still unresolved?",
-  "Who owns the Mumbai lease?",
-  "Summarize my actions today",
+  'Who owns the Mumbai lease?',
+  'Summarize my actions today',
 ]
 
 export function ChatInput({ onSend, onStop, disabled, isStreaming, placeholder }: ChatInputProps) {
@@ -47,63 +47,60 @@ export function ChatInput({ onSend, onStop, disabled, isStreaming, placeholder }
   }
 
   return (
-    <div className="shrink-0 border-t border-white/[0.05] bg-black/30 backdrop-blur-xl shadow-up px-4 sm:px-5 pt-3 pb-4 sm:pb-5">
+    <div className="shrink-0 border-t border-white/[0.06] bg-surface-1 shadow-lift px-4 sm:px-5 pt-3 pb-4 sm:pb-5">
 
-      {/* Quick prompts */}
       <div className="flex items-center gap-2 mb-3 overflow-x-auto scrollbar-none">
-        <span className="text-[10px] text-slate-600 shrink-0 font-medium tracking-wide uppercase">Quick</span>
         {QUICK_PROMPTS.map(p => (
           <button
             key={p}
             onClick={() => { if (!disabled && !isStreaming) onSend(p) }}
             disabled={disabled || isStreaming}
-            className="shrink-0 px-3 py-1 rounded-full text-[11px] font-medium text-slate-400 bg-white/[0.04] border border-white/[0.07] hover:border-brand-500/30 hover:text-brand-300 hover:bg-brand-500/[0.07] transition-all duration-150 disabled:opacity-30 disabled:cursor-not-allowed whitespace-nowrap focus-ring"
+            className="shrink-0 px-3 py-1.5 rounded-md text-[12px] font-medium text-ink-300 bg-white/[0.03] border border-white/[0.07] hover:border-brass-500/35 hover:text-brass-200 hover:bg-brass-500/[0.06] transition-colors duration-150 disabled:opacity-35 disabled:cursor-not-allowed whitespace-nowrap focus-ring"
           >
             {p}
           </button>
         ))}
       </div>
 
-      {/* Input row */}
-      <div className="flex items-end gap-3">
-        {/* Textarea wrapper */}
-        <div className="flex-1 glass rounded-2xl px-4 py-3 focus-within:border-brand-500/30 focus-within:shadow-glow-sm transition-all duration-200">
+      <div className="flex items-end gap-2.5">
+        <div className="flex-1 surface rounded-xl px-3.5 py-2.5 focus-within:border-brass-500/35 transition-colors duration-150">
           <textarea
             ref={textareaRef}
             value={value}
             onChange={e => { setValue(e.target.value); handleInput() }}
             onKeyDown={handleKeyDown}
-            placeholder={isStreaming ? 'Agent is responding…' : (placeholder ?? 'Ask about your commitments or deadlines…')}
+            placeholder={isStreaming ? 'Working on your question…' : (placeholder ?? 'Ask about commitments or deadlines…')}
             rows={1}
             disabled={disabled || isStreaming}
-            className="w-full bg-transparent text-sm text-slate-200 placeholder-slate-600 resize-none outline-none leading-relaxed disabled:opacity-50"
+            className="w-full bg-transparent text-sm text-ink-100 placeholder-ink-500 resize-none outline-none leading-relaxed disabled:opacity-50"
             style={{ minHeight: '22px', maxHeight: '148px' }}
           />
         </div>
 
-        {/* Action button */}
         {isStreaming ? (
           <button
             onClick={onStop}
-            className="w-10 h-10 rounded-xl bg-rose-600 hover:bg-rose-500 flex items-center justify-center shrink-0 transition-all duration-150 shadow-lg focus-ring"
-            title="Stop generation"
+            className="w-10 h-10 rounded-lg bg-rose-700 hover:bg-rose-600 flex items-center justify-center shrink-0 transition-colors duration-150 focus-ring"
+            title="Stop"
           >
-            <Square size={13} className="text-white fill-white" />
+            <Square size={12} className="text-white fill-white" />
           </button>
         ) : (
           <button
             onClick={handleSend}
             disabled={!canSend}
-            className="w-10 h-10 rounded-xl bg-brand-600 hover:bg-brand-500 flex items-center justify-center shrink-0 transition-all duration-150 shadow-glow-sm disabled:opacity-35 disabled:cursor-not-allowed focus-ring"
+            className="w-10 h-10 rounded-lg bg-brass-600 hover:bg-brass-500 flex items-center justify-center shrink-0 transition-colors duration-150 disabled:opacity-35 disabled:cursor-not-allowed focus-ring"
+            title="Send"
           >
-            <Send size={13} className="text-white" />
+            <Send size={13} className="text-ink-950" strokeWidth={2.25} />
           </button>
         )}
       </div>
 
-      {/* Hint */}
-      <p className="text-[10px] text-slate-700 mt-2.5 text-center">
-        {isStreaming ? 'Click the red button to stop generation' : 'Enter to send · Shift+Enter for a new line · All claims grounded in source data'}
+      <p className="text-[11px] text-ink-500 mt-2.5 text-center">
+        {isStreaming
+          ? 'Stop anytime with the button above'
+          : 'Enter to send · Shift+Enter for a new line'}
       </p>
     </div>
   )

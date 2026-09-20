@@ -1,4 +1,4 @@
-import { Zap, RotateCcw, Activity } from 'lucide-react'
+import { RotateCcw } from 'lucide-react'
 
 interface HeaderProps {
   totalCalls: number
@@ -9,41 +9,31 @@ interface HeaderProps {
 
 export function Header({ totalCalls, conversationTurns, onReset, isActive }: HeaderProps) {
   return (
-    <header className="shrink-0 flex items-center justify-between px-5 sm:px-6 h-14 border-b border-white/[0.06] bg-black/40 backdrop-blur-xl sticky top-0 z-30">
+    <header className="shrink-0 flex items-center justify-between px-4 sm:px-6 h-13 border-b border-white/[0.06] bg-surface-1 sticky top-0 z-30" style={{ height: '52px' }}>
 
-      {/* Brand */}
-      <div className="flex items-center gap-3">
-        <div className="relative">
-          <div className="w-7 h-7 rounded-lg bg-brand-600 flex items-center justify-center shadow-glow-sm">
-            <Zap size={14} className="text-white" strokeWidth={2.5} />
+      <div className="flex items-center gap-3 min-w-0">
+        <div className="relative shrink-0">
+          <div className="w-7 h-7 rounded-md bg-brass-600 flex items-center justify-center">
+            <span className="text-[11px] font-bold text-ink-950 tracking-tight">EA</span>
           </div>
           {isActive && (
-            <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-emerald-400 rounded-full border-2 border-[#0b0b0f]" />
+            <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-emerald-500 rounded-full border-2 border-surface-1" />
           )}
         </div>
-        <div className="hidden sm:block">
-          <p className="text-sm font-semibold text-white leading-none tracking-tight">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-ink-50 leading-none tracking-tight truncate">
             Executive Agent
           </p>
-          <p className="text-[11px] text-slate-500 mt-0.5">
-            Arjun Malhotra · VP Sales · 21–25 Sep 2026
+          <p className="text-[11px] text-ink-400 mt-0.5 truncate hidden sm:block">
+            Arjun Malhotra · VP Sales · week of 21 Sep 2026
           </p>
-        </div>
-        <div className="sm:hidden">
-          <p className="text-sm font-semibold text-white">Executive Agent</p>
         </div>
       </div>
 
-      {/* Right side */}
-      <div className="flex items-center gap-2 sm:gap-3">
-
-        {/* LLM call counter */}
+      <div className="flex items-center gap-2 sm:gap-3 shrink-0">
         {totalCalls > 0 && (
-          <div className="hidden sm:flex items-center gap-3 text-[11px] text-slate-500 px-3 py-1.5 rounded-lg bg-white/[0.03] border border-white/[0.05]">
-            <span className="flex items-center gap-1.5">
-              <Activity size={10} className="text-brand-400" />
-              {totalCalls} LLM call{totalCalls !== 1 ? 's' : ''}
-            </span>
+          <div className="hidden sm:flex items-center gap-2.5 text-[11px] text-ink-400 px-2.5 py-1 rounded-md bg-white/[0.03] border border-white/[0.06]">
+            <span>{totalCalls} model call{totalCalls !== 1 ? 's' : ''}</span>
             {conversationTurns > 0 && (
               <>
                 <span className="w-px h-3 bg-white/10" />
@@ -53,13 +43,12 @@ export function Header({ totalCalls, conversationTurns, onReset, isActive }: Hea
           </div>
         )}
 
-        {/* Reset */}
         <button
           onClick={onReset}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-400 hover:text-white hover:bg-white/[0.07] transition-all duration-150 focus-ring"
-          title="Reset conversation"
+          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium text-ink-400 hover:text-ink-100 hover:bg-white/[0.05] transition-colors duration-150 focus-ring"
+          title="Start over"
         >
-          <RotateCcw size={12} />
+          <RotateCcw size={12} strokeWidth={2} />
           <span className="hidden sm:inline">Reset</span>
         </button>
       </div>

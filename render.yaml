@@ -4,9 +4,7 @@ services:
     runtime: python
     region: singapore
     plan: free
-    buildCommand: |
-      pip install -r backend/requirements.txt
-      cd frontend && npm install && npm run build
+    buildCommand: pip install -r backend/requirements.txt && cd frontend && npm install && npm run build
     startCommand: cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: GROQ_API_KEY
@@ -14,4 +12,6 @@ services:
       - key: GROQ_MODEL
         value: qwen/qwen3.8-27b
       - key: PYTHON_VERSION
-        value: "3.12"
+        value: "3.12.0"
+      - key: NODE_VERSION
+        value: "20.18.0"

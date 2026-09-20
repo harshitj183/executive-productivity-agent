@@ -9,10 +9,15 @@ The agent reads his meeting transcript, email threads, calendar, and personal vo
 ## Quick Start (One Command)
 
 ```bash
-# 1. Clone / navigate to the project root
-cd projects/executive-agent
+# Clone the repo
+git clone https://github.com/harshitj183/executive-productivity-agent.git
+cd executive-productivity-agent
 
-# 2. Start everything
+# Create backend/.env with your Groq key
+echo "GROQ_API_KEY=your_key_here" > backend/.env
+echo "GROQ_MODEL=qwen/qwen3.8-27b" >> backend/.env
+
+# Start everything
 ./start.sh
 ```
 
@@ -111,7 +116,7 @@ See [`docs/architecture.md`](docs/architecture.md) for the detailed flow diagram
 
 | Layer | Technology |
 |-------|-----------|
-| LLM | Groq API — Qwen QwQ 32B |
+| LLM | Groq API — Qwen 3.8B-27B (`qwen/qwen3.8-27b`) |
 | Backend | Python 3.12, FastAPI, Uvicorn |
 | Agentic loop | Native function calling via Groq SDK |
 | Frontend | React 18, TypeScript, Vite, Tailwind CSS |

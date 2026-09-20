@@ -168,7 +168,7 @@ class MainAgent:
                     tools=TOOL_DEFINITIONS,
                     tool_choice="auto",
                     temperature=0.1,
-                    max_tokens=4096,
+                    max_tokens=800,
                 )
             except Exception as e:
                 logger.error(f"Groq API error: {e}")

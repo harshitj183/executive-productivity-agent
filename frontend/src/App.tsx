@@ -185,7 +185,7 @@ export default function App() {
 
   /* ── Render ────────────────────────────────────────────────────────── */
   return (
-    <div className="h-screen flex flex-col bg-[#0b0b0f] overflow-hidden">
+    <div className="h-screen flex flex-col bg-ink overflow-hidden">
       <Header
         totalCalls={totalCalls}
         conversationTurns={conversationTurns}
@@ -200,8 +200,8 @@ export default function App() {
             isLoading={appState === 'generating_brief'}
           />
         ) : (
-          <div className="max-w-3xl mx-auto w-full px-4 sm:px-6 py-6 space-y-5 pb-4">
-            {messages.map((msg, i) => (
+          <div className="max-w-2xl mx-auto w-full px-4 sm:px-6 py-6 space-y-6 pb-4">
+            {messages.map(msg => (
               <MessageBubble
                 key={msg.id}
                 message={msg}
@@ -218,14 +218,13 @@ export default function App() {
         )}
       </main>
 
-      {/* Input bar — only after session starts */}
       {!isIdle && (
         <ChatInput
           onSend={handleChat}
           onStop={handleStop}
           disabled={appState === 'validating'}
           isStreaming={isStreaming}
-          placeholder="Ask about your commitments, deadlines, or action items…"
+          placeholder="Ask about commitments, deadlines, or owners…"
         />
       )}
     </div>

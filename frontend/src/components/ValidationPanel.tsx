@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ChevronDown, ChevronRight, ShieldCheck, ShieldAlert, ShieldX } from 'lucide-react'
+import { ChevronDown, ChevronRight } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
@@ -13,30 +13,30 @@ function detectVerdict(text: string): Verdict | null {
   const u = text.toUpperCase()
   if (u.includes('VERDICT: PASS') || u.includes('**PASS**') || u.includes('VERDICT:**PASS')) return 'PASS'
   if (u.includes('VERDICT: FAIL') || u.includes('**FAIL**') || u.includes('VERDICT:**FAIL')) return 'FAIL'
-  if (u.includes('VERDICT: PARTIAL') || u.includes('**PARTIAL**') || u.includes('PARTIAL'))   return 'PARTIAL'
+  if (u.includes('VERDICT: PARTIAL') || u.includes('**PARTIAL**')) return 'PARTIAL'
   return null
 }
 
 const verdictConfig = {
   PASS: {
-    Icon: ShieldCheck,
-    label: 'Validation passed',
-    pill: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20',
-    header: 'bg-emerald-500/[0.06] border-emerald-500/15',
+    label: 'Sources check out',
+    tone: 'text-emerald-300',
+    border: 'border-emerald-500/20',
+    bg: 'bg-emerald-500/[0.05]',
     dot: 'bg-emerald-400',
   },
   FAIL: {
-    Icon: ShieldX,
-    label: 'Validation failed',
-    pill: 'bg-rose-500/10 text-rose-300 border-rose-500/20',
-    header: 'bg-rose-500/[0.06] border-rose-500/15',
+    label: 'Issues found',
+    tone: 'text-rose-300',
+    border: 'border-rose-500/20',
+    bg: 'bg-rose-500/[0.05]',
     dot: 'bg-rose-400',
   },
   PARTIAL: {
-    Icon: ShieldAlert,
-    label: 'Partial pass',
-    pill: 'bg-amber-500/10 text-amber-300 border-amber-500/20',
-    header: 'bg-amber-500/[0.06] border-amber-500/15',
+    label: 'Partial match',
+    tone: 'text-amber-200',
+    border: 'border-amber-500/20',
+    bg: 'bg-amber-500/[0.05]',
     dot: 'bg-amber-400',
   },
 }
@@ -44,33 +44,36 @@ const verdictConfig = {
 export function ValidationPanel({ content }: ValidationPanelProps) {
   const [expanded, setExpanded] = useState(true)
   const verdict = detectVerdict(content)
-  const cfg = verdict ? verdictConfig[verdict] : verdictConfig.PARTIAL
+  const cfg = verdict ? verdictConfig[verdict] : {
+    label: 'Source check',
+    tone: 'text-ink-300',
+    border: 'border-white/[0.08]',
+    bg: 'bg-white/[0.02]',
+    dot: 'bg-ink-400',
+  }
 
   return (
-    <div className={`mt-3 rounded-xl border overflow-hidden animate-slide-up ${cfg.header}`}>
-      {/* Toggle header */}
+    <div className={`mt-2 rounded-lg border overflow-hidden animate-slide-up ${cfg.border} ${cfg.bg}`}>
       <button
         onClick={() => setExpanded(v => !v)}
-        className="w-full flex items-center gap-2.5 px-4 py-2.5 text-left hover:brightness-110 transition-all"
+        className="w-full flex items-center gap-2 px-3.5 py-2.5 text-left hover:bg-white/[0.02] transition-colors focus-ring"
       >
-        <cfg.Icon size={13} className={`shrink-0 ${cfg.pill.split(' ')[1]}`} />
-        <span className={`text-xs font-semibold ${cfg.pill.split(' ')[1]}`}>
-          Validator · {cfg.label}
+        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${cfg.dot}`} />
+        <span className={`text-xs font-semibold ${cfg.tone}`}>
+          {cfg.label}
         </span>
         {verdict && (
-          <span className={`ml-auto flex items-center gap-1.5 text-[10px] font-bold tracking-wider uppercase ${cfg.pill.split(' ')[1]}`}>
-            <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
+          <span className={`ml-auto text-[10px] font-semibold tracking-wide uppercase ${cfg.tone}`}>
             {verdict}
           </span>
         )}
-        <span className={`${verdict ? '' : 'ml-auto'} text-slate-500`}>
+        <span className={`${verdict ? 'ml-2' : 'ml-auto'} text-ink-500`}>
           {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
         </span>
       </button>
 
-      {/* Content */}
       {expanded && (
-        <div className="px-4 pb-4 pt-1 border-t border-white/[0.05] animate-slide-down">
+        <div className="px-3.5 pb-3.5 pt-1 border-t border-white/[0.05] animate-slide-down">
           <div className="agent-response text-sm">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
           </div>
