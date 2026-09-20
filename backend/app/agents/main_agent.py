@@ -110,10 +110,7 @@ class MainAgent:
             {"role": "system", "content": SYSTEM_PROMPT},
             {
                 "role": "user",
-                "content": (
-                    f"Here is all source data for this week:\n\n{self.source_context}\n\n"
-                    f"--- End of source data ---\n\n{BRIEF_GENERATION_PROMPT}"
-                )
+                "content": BRIEF_GENERATION_PROMPT
             }
         ]
         self._initialized = True
