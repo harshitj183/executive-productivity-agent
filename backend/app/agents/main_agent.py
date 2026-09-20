@@ -1,22 +1,12 @@
 """
 Main Agent — Executive Productivity Agent for Arjun Malhotra.
-
-Responsibilities:
-- Extract commitments from all sources (meeting, email, calendar, voice notes)
-- Classify each commitment: MY_ACTION | WAITING_ON_OTHERS | AMBIGUOUS
-- Detect deadlines and urgency
-- Deduplicate the same commitment appearing across multiple sources
-- Generate the daily brief
-- Answer follow-up questions with memory
-- Show source attribution for every item
-
-Uses Groq API with function-calling (tool use).
+Uses Groq function-calling with a tight token budget (7000 ITPM on free tier).
 """
 
 import json
 import logging
 import os
-from typing import Any, Generator, Optional
+from typing import Generator
 
 from groq import Groq
 
@@ -26,44 +16,28 @@ from app.data.source_data import get_all_sources_as_text
 logger = logging.getLogger(__name__)
 
 GROQ_MODEL = os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b")
-MAX_TOOL_ITERATIONS = 8  # cap agentic loops to control cost
+MAX_TOOL_ITERATIONS = 6
 
-SYSTEM_PROMPT = """You are an Executive Productivity Agent built exclusively for Arjun Malhotra, VP Sales at Veridian Corp.
-Your job is to read his meeting transcript, emails, calendar, and voice notes — then extract every commitment, track deadlines, and give him a clear, honest daily brief.
+# ── Kept under 400 tokens ────────────────────────────────────────────────────
+SYSTEM_PROMPT = """You are an Executive Productivity Agent for Arjun Malhotra (VP Sales, Veridian Corp).
+Week: Mon 21 Sep – Fri 25 Sep 2026. Today = Monday 21 Sep 2026.
 
-CRITICAL RULES:
-1. Never invent facts. If something is unclear or unassigned, say so explicitly — don't guess ownership.
-2. Every commitment you surface must cite which source(s) it came from (meeting, email thread title, voice note date).
-3. Classify every item as:
-   - MY_ACTION: Arjun committed to do this himself
-   - WAITING_ON_OTHERS: Someone else committed to deliver something to Arjun
-   - AMBIGUOUS: Ownership is unclear or explicitly unresolved (flag these with a note)
-4. When the same commitment appears in multiple sources with conflicting dates, surface the MOST RECENT/FINAL version and note the history.
-5. Use your tools to search source data — don't rely only on your memory of the context.
-6. Be concise but complete. Arjun is busy.
-7. Today is Monday, 21 September 2026. The week runs Mon 21 Sep – Fri 25 Sep.
+RULES:
+- Never invent facts. If ownership is unclear, flag it — never assume.
+- Cite source for every item (meeting / email thread name / voice note date).
+- Classify: MY_ACTION (Arjun does it) | WAITING_ON_OTHERS | AMBIGUOUS (flag these).
+- When same commitment appears in multiple sources with conflicting dates: surface the most recent version only, note the shift.
+- Use tools to look up data. Be concise — Arjun is busy.
 
-When generating the daily brief, structure it as:
-- Section 1: MY ACTIONS (items Arjun must do, sorted by urgency)
-- Section 2: WAITING ON OTHERS (items Arjun is expecting from others)
-- Section 3: FLAGGED / NEEDS ATTENTION (ambiguous ownership, conflicting info, overdue items)
+BRIEF FORMAT:
+## My Actions  (overdue → today → this week)
+## Waiting on Others
+## Flagged / Needs Attention"""
 
-For follow-up questions, use conversation history — Arjun should not have to re-explain context."""
-
-BRIEF_GENERATION_PROMPT = """Generate the daily brief for Arjun Malhotra for the week of 21–25 September 2026.
-
-Use your tools to:
-1. Search emails, meeting transcript, and voice notes for all commitments
-2. Check deadlines and urgency for each item
-3. Identify which thread shows the final/latest version of any rescheduled item
-4. Flag the Mumbai lease situation explicitly (ownership unclear)
-
-Then produce a structured brief with:
-- MY ACTIONS (Arjun's own commitments, sorted overdue → today → this week)
-- WAITING ON OTHERS (what Arjun is expecting from others)
-- FLAGGED (ambiguous ownership, conflicts, risks)
-
-For each item, cite the source(s) and the current deadline."""
+# ── Under 120 tokens ─────────────────────────────────────────────────────────
+BRIEF_GENERATION_PROMPT = """Generate Arjun's daily brief for week of 21–25 Sep 2026.
+Use tools to: find all commitments across emails/transcript/voice notes, check deadlines, track date shifts (e.g. vendor list moved Mon→Tue→Wed), flag Mumbai lease as AMBIGUOUS.
+Cite source + deadline for every item."""
 
 
 class MainAgent:
@@ -75,76 +49,58 @@ class MainAgent:
         self._initialized = False
 
     def reset_conversation(self):
-        """Clear conversation history but keep source context."""
         self.conversation_history = []
         self._initialized = False
-        logger.info("Conversation history cleared.")
 
     def _build_messages(self, user_message: str) -> list[dict]:
-        """Build the full message list for the API call."""
         messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-
-        # Include source context in the first message only (cost optimization)
         if not self._initialized:
-            context_intro = (
-                "Here is all source data for this week. Use this along with your tools "
-                "to answer questions accurately.\n\n"
-                f"{self.source_context}\n\n"
-                "--- End of source data ---\n\n"
-                f"User request: {user_message}"
-            )
-            messages.append({"role": "user", "content": context_intro})
+            # First chat call: inject source data once
+            messages.append({
+                "role": "user",
+                "content": (
+                    f"SOURCE DATA:\n{self.source_context}\n---\n{user_message}"
+                )
+            })
             self._initialized = True
         else:
-            # Subsequent messages: only include the new user message
             messages.extend(self.conversation_history)
             messages.append({"role": "user", "content": user_message})
-
         return messages
 
     def generate_brief(self) -> Generator[dict, None, None]:
-        """Generate the initial daily brief. Yields log events and the final result."""
         yield {"type": "log", "step": "init", "message": "Starting brief generation..."}
 
+        # Brief generation: NO source context in the message — agent uses tools
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": BRIEF_GENERATION_PROMPT
-            }
+            {"role": "user", "content": BRIEF_GENERATION_PROMPT},
         ]
         self._initialized = True
 
         result = yield from self._run_agentic_loop(messages, log_prefix="Brief")
-        if result is None:
+        if not result:
             result = ""
 
-        # Store in conversation history for follow-ups
         self.conversation_history.append({"role": "user", "content": BRIEF_GENERATION_PROMPT})
         self.conversation_history.append({"role": "assistant", "content": result})
 
         yield {"type": "result", "content": result}
 
     def chat(self, user_message: str) -> Generator[dict, None, None]:
-        """Handle a follow-up question with full conversation memory."""
-        yield {"type": "log", "step": "chat_start", "message": f"Processing: {user_message[:80]}..."}
+        yield {"type": "log", "step": "chat_start", "message": f"Processing: {user_message[:60]}..."}
 
         messages = self._build_messages(user_message)
         result = yield from self._run_agentic_loop(messages, log_prefix="Chat")
-        if result is None:
+        if not result:
             result = ""
 
-        # Append to history
         self.conversation_history.append({"role": "user", "content": user_message})
         self.conversation_history.append({"role": "assistant", "content": result})
 
         yield {"type": "result", "content": result}
 
     def _run_agentic_loop(self, messages: list[dict], log_prefix: str = "") -> Generator[dict, None, str]:
-        """
-        Core agentic loop: call LLM → handle tool calls → repeat → return final text.
-        Yields log events throughout, returns the final text response.
-        """
         iteration = 0
         current_messages = list(messages)
 
@@ -155,7 +111,7 @@ class MainAgent:
             yield {
                 "type": "log",
                 "step": f"llm_call_{iteration}",
-                "message": f"[{log_prefix}] LLM call #{self.call_count} (iteration {iteration})"
+                "message": f"[{log_prefix}] LLM call #{self.call_count} (iter {iteration})"
             }
 
             try:
@@ -165,78 +121,62 @@ class MainAgent:
                     tools=TOOL_DEFINITIONS,
                     tool_choice="auto",
                     temperature=0.1,
-                    max_tokens=800,
+                    max_tokens=1200,
                 )
             except Exception as e:
-                logger.error(f"Groq API error: {e}")
+                logger.error(f"Groq error: {e}")
                 yield {"type": "error", "message": f"LLM call failed: {str(e)}"}
                 return f"Error: {str(e)}"
 
-            choice = response.choices[0]
-            message = choice.message
+            msg = response.choices[0].message
 
-            # If there are tool calls, execute them
-            if message.tool_calls:
-                current_messages.append(message)  # assistant message with tool_calls
-
-                for tool_call in message.tool_calls:
-                    tool_name = tool_call.function.name
+            if msg.tool_calls:
+                current_messages.append(msg)
+                for tc in msg.tool_calls:
+                    tname = tc.function.name
                     try:
-                        args = json.loads(tool_call.function.arguments)
+                        args = json.loads(tc.function.arguments)
                     except json.JSONDecodeError:
                         args = {}
 
                     yield {
                         "type": "tool_call",
-                        "tool": tool_name,
+                        "tool": tname,
                         "args": args,
-                        "message": f"Calling tool: {tool_name}({json.dumps(args)})"
+                        "message": f"→ {tname}({json.dumps(args)})"
                     }
 
-                    result = execute_tool(tool_name, args)
+                    tres = execute_tool(tname, args)
 
                     yield {
                         "type": "tool_result",
-                        "tool": tool_name,
-                        "message": f"Tool result ({len(result)} chars)"
+                        "tool": tname,
+                        "message": f"← {tname}: {len(tres)} chars"
                     }
 
                     current_messages.append({
                         "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "content": result
+                        "tool_call_id": tc.id,
+                        "content": tres,
                     })
-
-                # Continue the loop to let the model process tool results
                 continue
 
-            # No tool calls — we have the final response
-            final_text = message.content or ""
+            final_text = msg.content or ""
             yield {
                 "type": "log",
                 "step": "complete",
-                "message": f"[{log_prefix}] Done after {iteration} iteration(s), {self.call_count} total LLM calls."
+                "message": f"[{log_prefix}] Done — {iteration} iter, {self.call_count} calls total"
             }
             return final_text
 
-        # Exceeded max iterations
-        logger.warning(f"Hit max iterations ({MAX_TOOL_ITERATIONS})")
-        yield {
-            "type": "log",
-            "step": "max_iterations",
-            "message": f"Warning: reached max tool iterations ({MAX_TOOL_ITERATIONS})."
-        }
-        # Try to get a final response
-        current_messages.append({
-            "role": "user",
-            "content": "Please provide your final answer based on what you've gathered so far."
-        })
+        # Max iterations hit — force a final answer
+        yield {"type": "log", "step": "max_iter", "message": "Max iterations reached, finalizing..."}
+        current_messages.append({"role": "user", "content": "Summarize your findings now."})
         self.call_count += 1
-        response = self.client.chat.completions.create(
+        resp = self.client.chat.completions.create(
             model=GROQ_MODEL,
             messages=current_messages,
             temperature=0.1,
-            max_tokens=800,
+            max_tokens=1200,
         )
-        final_text = response.choices[0].message.content or ""
-        return final_text
+        return resp.choices[0].message.content or ""

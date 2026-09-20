@@ -150,30 +150,31 @@ VOICE_NOTES = [
 
 
 def get_all_sources_as_text() -> str:
-    """Returns all source data as a single formatted text block for LLM context."""
+    """
+    Compact source text for LLM context injection.
+    Kept minimal to stay within free-tier token limits.
+    """
     lines = []
 
-    lines.append("=== MEETING TRANSCRIPT ===")
+    lines.append("MEETING (Mon 21 Sep 9:00-9:35):")
     lines.append(MEETING_TRANSCRIPT.strip())
     lines.append("")
 
-    lines.append("=== ARJUN'S CALENDAR (Week of 21–25 Sep 2026) ===")
-    for entry in CALENDARS["arjun"]:
-        lines.append(f"  {entry['date']} {entry['start']}–{entry['end']}: {entry['title']}")
+    lines.append("ARJUN CALENDAR:")
+    for e in CALENDARS["arjun"]:
+        lines.append(f"  {e['date']} {e['start']}: {e['title']}")
     lines.append("")
 
-    lines.append("=== EMAIL THREADS ===")
-    for thread in EMAIL_THREADS:
-        lines.append(f"\n--- Thread: {thread['subject']} ---")
-        for email in thread["emails"]:
-            lines.append(f"  [{email['date']} {email['time']}] From: {email['from']} → To: {email['to']}")
-            lines.append(f"  \"{email['body']}\"")
+    lines.append("EMAILS:")
+    for t in EMAIL_THREADS:
+        lines.append(f"[{t['subject']}]")
+        for e in t["emails"]:
+            sender = e["from"].split("@")[0]
+            lines.append(f"  {e['date']} {e['time']} {sender}: {e['body']}")
     lines.append("")
 
-    lines.append("=== VOICE NOTES (by Arjun Malhotra, personal memos) ===")
-    for note in VOICE_NOTES:
-        lines.append(f"\n[{note['date']} {note['time']} — {note['context']}]")
-        lines.append(f"  \"{note['transcript']}\"")
-    lines.append("")
+    lines.append("VOICE NOTES (Arjun personal memos):")
+    for n in VOICE_NOTES:
+        lines.append(f"  [{n['date']} {n['time']}]: {n['transcript']}")
 
     return "\n".join(lines)

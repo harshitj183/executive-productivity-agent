@@ -1,13 +1,13 @@
 """
-Agent tools — these are the callable functions the main agent can invoke
-to search source data, calculate deadlines, and cross-reference entries.
+Agent tools — callable functions for the main agent.
+Descriptions kept short to save tokens on the free Groq tier (7000 ITPM).
 """
 
-from datetime import date, datetime, timedelta
+from datetime import date
 from typing import Optional
 from app.data.source_data import (
     EMAIL_THREADS, VOICE_NOTES, MEETING_TRANSCRIPT,
-    CALENDARS, PEOPLE, WEEK_START, WEEK_END
+    CALENDARS, PEOPLE,
 )
 
 TOOL_DEFINITIONS = [
@@ -15,14 +15,11 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "search_emails",
-            "description": "Search all email threads for a keyword, person name, or topic. Returns matching emails with their thread subject, date, sender, and body.",
+            "description": "Search all email threads by keyword, sender, or topic.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Keyword or phrase to search for (case-insensitive)"
-                    }
+                    "query": {"type": "string", "description": "Keyword to search (case-insensitive)"}
                 },
                 "required": ["query"]
             }
@@ -32,14 +29,11 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "search_voice_notes",
-            "description": "Search Arjun's voice note transcripts for a keyword or topic.",
+            "description": "Search Arjun's personal voice note transcripts.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Keyword or phrase to search for"
-                    }
+                    "query": {"type": "string", "description": "Keyword to search"}
                 },
                 "required": ["query"]
             }
@@ -49,14 +43,11 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "search_meeting_transcript",
-            "description": "Search the Leadership Sync meeting transcript for specific statements, commitments, or topics.",
+            "description": "Search the Leadership Sync meeting transcript.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Keyword, person name, or topic to search for"
-                    }
+                    "query": {"type": "string", "description": "Keyword or person name"}
                 },
                 "required": ["query"]
             }
@@ -66,18 +57,17 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "get_calendar_events",
-            "description": "Get calendar events for a specific person and/or date range.",
+            "description": "Get calendar events for a person (arjun/neha/raghav/divya), optionally filtered by date.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "person": {
                         "type": "string",
-                        "description": "Person key: arjun, neha, raghav, divya",
                         "enum": ["arjun", "neha", "raghav", "divya"]
                     },
                     "date_filter": {
                         "type": "string",
-                        "description": "Optional specific date in YYYY-MM-DD format to filter by"
+                        "description": "YYYY-MM-DD (optional)"
                     }
                 },
                 "required": ["person"]
@@ -88,14 +78,11 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "calculate_deadline_urgency",
-            "description": "Given a deadline date string, calculate how many days away it is from today (2026-09-21) and whether it's overdue, today, tomorrow, or this week.",
+            "description": "Calculate urgency of a deadline relative to today (21 Sep 2026). Accepts YYYY-MM-DD or day name.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "deadline_date": {
-                        "type": "string",
-                        "description": "Deadline date in YYYY-MM-DD format or natural language like 'Wednesday', 'Friday', 'Thursday morning'"
-                    }
+                    "deadline_date": {"type": "string", "description": "e.g. 'Wednesday', 'Friday', '2026-09-24'"}
                 },
                 "required": ["deadline_date"]
             }
@@ -105,14 +92,11 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "get_person_info",
-            "description": "Get name, role, and email of a person involved in Arjun's week.",
+            "description": "Get name, role, and email of a stakeholder.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "person_key": {
-                        "type": "string",
-                        "description": "Person key: arjun, neha, raghav, divya, priya, facilities"
-                    }
+                    "person_key": {"type": "string", "description": "arjun | neha | raghav | divya | priya | facilities"}
                 },
                 "required": ["person_key"]
             }
@@ -122,14 +106,11 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "get_thread_history",
-            "description": "Get the full email thread history for a specific subject to track how a commitment or date evolved.",
+            "description": "Get full chronological email thread to track how a deadline or commitment evolved.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "subject_keyword": {
-                        "type": "string",
-                        "description": "Keyword from the thread subject (e.g. 'vendor', 'deck', 'expense', 'Mumbai', 'reschedule')"
-                    }
+                    "subject_keyword": {"type": "string", "description": "Part of thread subject, e.g. 'vendor', 'deck', 'Mumbai'"}
                 },
                 "required": ["subject_keyword"]
             }
@@ -139,7 +120,6 @@ TOOL_DEFINITIONS = [
 
 
 def execute_tool(tool_name: str, arguments: dict) -> str:
-    """Execute a tool by name and return result as a string."""
     handlers = {
         "search_emails": _search_emails,
         "search_voice_notes": _search_voice_notes,
@@ -149,131 +129,95 @@ def execute_tool(tool_name: str, arguments: dict) -> str:
         "get_person_info": _get_person_info,
         "get_thread_history": _get_thread_history,
     }
-    handler = handlers.get(tool_name)
-    if not handler:
+    fn = handlers.get(tool_name)
+    if not fn:
         return f"Unknown tool: {tool_name}"
-    return handler(**arguments)
+    try:
+        return fn(**arguments)
+    except Exception as e:
+        return f"Tool error: {e}"
 
-
-# ── Tool implementations ──────────────────────────────────────────────────────
 
 def _search_emails(query: str) -> str:
-    query_lower = query.lower()
+    q = query.lower()
     results = []
-    for thread in EMAIL_THREADS:
-        for email in thread["emails"]:
-            if (query_lower in email["body"].lower()
-                    or query_lower in email["from"].lower()
-                    or query_lower in email["to"].lower()
-                    or query_lower in thread["subject"].lower()):
+    for t in EMAIL_THREADS:
+        for e in t["emails"]:
+            if q in e["body"].lower() or q in e["from"].lower() or q in t["subject"].lower():
                 results.append(
-                    f"[Thread: {thread['subject']}] [{email['date']} {email['time']}]\n"
-                    f"  From: {email['from']} → To: {email['to']}\n"
-                    f"  \"{email['body']}\""
+                    f"[{t['subject']}][{e['date']} {e['time']}] {e['from']}→{e['to']}: \"{e['body']}\""
                 )
-    if not results:
-        return f"No emails found matching '{query}'."
-    return f"Found {len(results)} email(s) matching '{query}':\n\n" + "\n\n".join(results)
+    return "\n".join(results) if results else f"No emails matching '{query}'."
 
 
 def _search_voice_notes(query: str) -> str:
-    query_lower = query.lower()
+    q = query.lower()
     results = []
-    for note in VOICE_NOTES:
-        if query_lower in note["transcript"].lower():
-            results.append(
-                f"[{note['date']} {note['time']} — {note['context']}]\n"
-                f"  \"{note['transcript']}\""
-            )
-    if not results:
-        return f"No voice notes found matching '{query}'."
-    return f"Found {len(results)} voice note(s) matching '{query}':\n\n" + "\n\n".join(results)
+    for n in VOICE_NOTES:
+        if q in n["transcript"].lower():
+            results.append(f"[{n['date']} {n['time']} {n['context']}]: \"{n['transcript']}\"")
+    return "\n".join(results) if results else f"No voice notes matching '{query}'."
 
 
 def _search_meeting_transcript(query: str) -> str:
-    query_lower = query.lower()
-    lines = MEETING_TRANSCRIPT.strip().split("\n")
-    matching_lines = [line for line in lines if query_lower in line.lower()]
-    if not matching_lines:
-        return f"No lines in the meeting transcript matching '{query}'."
-    return f"Matching lines from Leadership Sync transcript:\n\n" + "\n".join(matching_lines)
+    q = query.lower()
+    lines = [l for l in MEETING_TRANSCRIPT.strip().split("\n") if q in l.lower()]
+    return "\n".join(lines) if lines else f"No transcript lines matching '{query}'."
 
 
 def _get_calendar_events(person: str, date_filter: Optional[str] = None) -> str:
-    events = CALENDARS.get(person)
-    if not events:
-        return f"No calendar found for '{person}'."
+    events = CALENDARS.get(person, [])
     if date_filter:
         events = [e for e in events if e["date"] == date_filter]
     if not events:
-        return f"No events found for {person} on {date_filter}."
-    person_info = PEOPLE.get(person, {})
-    name = person_info.get("name", person)
-    lines = [f"Calendar for {name}:"]
-    for e in events:
-        lines.append(f"  {e['date']} {e['start']}–{e['end']}: {e['title']}")
-    return "\n".join(lines)
+        return f"No events for {person}" + (f" on {date_filter}" if date_filter else "") + "."
+    name = PEOPLE.get(person, {}).get("name", person)
+    return f"{name}:\n" + "\n".join(f"  {e['date']} {e['start']}–{e['end']}: {e['title']}" for e in events)
 
 
 def _calculate_deadline_urgency(deadline_date: str) -> str:
     today = date(2026, 9, 21)
     day_map = {
-        "monday": date(2026, 9, 21),
-        "tuesday": date(2026, 9, 22),
-        "wednesday": date(2026, 9, 23),
-        "thursday": date(2026, 9, 24),
+        "monday": date(2026, 9, 21), "tuesday": date(2026, 9, 22),
+        "wednesday": date(2026, 9, 23), "thursday": date(2026, 9, 24),
         "friday": date(2026, 9, 25),
     }
-
-    # Normalize natural language
-    deadline_lower = deadline_date.lower().strip()
-    for day_name, day_date in day_map.items():
-        if day_name in deadline_lower:
-            deadline = day_date
+    dl = deadline_date.lower().strip()
+    deadline = None
+    for name, d in day_map.items():
+        if name in dl:
+            deadline = d
             break
-    else:
+    if not deadline:
         try:
             deadline = date.fromisoformat(deadline_date.strip())
         except ValueError:
-            return f"Could not parse deadline date: '{deadline_date}'. Use YYYY-MM-DD or day name (Monday–Friday)."
-
+            return f"Cannot parse '{deadline_date}'."
     delta = (deadline - today).days
-
     if delta < 0:
         status = f"OVERDUE by {abs(delta)} day(s)"
     elif delta == 0:
         status = "DUE TODAY"
     elif delta == 1:
         status = "DUE TOMORROW"
-    elif delta <= 4:
-        status = f"Due in {delta} days (this week)"
     else:
-        status = f"Due in {delta} days"
-
-    return (
-        f"Deadline: {deadline.strftime('%A, %d %B %Y')}\n"
-        f"Today: {today.strftime('%A, %d %B %Y')}\n"
-        f"Status: {status}"
-    )
+        status = f"Due in {delta} days (this week)"
+    return f"{deadline.strftime('%A %d %b')} — {status}"
 
 
 def _get_person_info(person_key: str) -> str:
-    person = PEOPLE.get(person_key.lower())
-    if not person:
-        return f"No person found with key '{person_key}'. Valid keys: {', '.join(PEOPLE.keys())}"
-    return f"Name: {person['name']}\nRole: {person['role']}\nEmail: {person['email']}"
+    p = PEOPLE.get(person_key.lower())
+    if not p:
+        return f"Unknown: '{person_key}'. Valid: {', '.join(PEOPLE)}"
+    return f"{p['name']} | {p['role']} | {p['email']}"
 
 
 def _get_thread_history(subject_keyword: str) -> str:
-    keyword_lower = subject_keyword.lower()
-    for thread in EMAIL_THREADS:
-        if keyword_lower in thread["subject"].lower():
-            lines = [f"Full thread: '{thread['subject']}'"]
-            for i, email in enumerate(thread["emails"], 1):
-                lines.append(
-                    f"\n  Email {i} — [{email['date']} {email['time']}]"
-                    f"\n  From: {email['from']} → To: {email['to']}"
-                    f"\n  \"{email['body']}\""
-                )
+    kw = subject_keyword.lower()
+    for t in EMAIL_THREADS:
+        if kw in t["subject"].lower():
+            lines = [f"Thread: {t['subject']}"]
+            for i, e in enumerate(t["emails"], 1):
+                lines.append(f"  {i}. [{e['date']} {e['time']}] {e['from']}→{e['to']}: \"{e['body']}\"")
             return "\n".join(lines)
-    return f"No thread found with subject containing '{subject_keyword}'."
+    return f"No thread matching '{subject_keyword}'."
