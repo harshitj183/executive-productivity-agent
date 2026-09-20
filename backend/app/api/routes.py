@@ -68,25 +68,28 @@ async def _stream_sync_generator(gen) -> AsyncGenerator[str, None]:
 @router.post("/brief")
 async def generate_brief():
     """Generate the daily brief — SSE stream of reasoning + final result."""
-    session = get_session()
-    gen = session.main_agent.generate_brief()
+    try:
+        session = get_session()
+        gen = session.main_agent.generate_brief()
 
-    async def stream():
-        async for chunk in _stream_sync_generator(gen):
-            try:
-                data = json.loads(chunk.removeprefix("data: ").strip())
-                if data.get("type") == "result":
-                    session.last_brief = data.get("content", "")
-                    session.brief_generated = True
-            except Exception:
-                pass
-            yield chunk
+        async def stream():
+            async for chunk in _stream_sync_generator(gen):
+                try:
+                    data = json.loads(chunk.removeprefix("data: ").strip())
+                    if data.get("type") == "result":
+                        session.last_brief = data.get("content", "")
+                        session.brief_generated = True
+                except Exception:
+                    pass
+                yield chunk
 
-    return StreamingResponse(
-        stream(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+        return StreamingResponse(
+            stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+    except ValueError as e:
+        return {"status": "error", "message": str(e)}
 
 
 @router.post("/chat")
@@ -94,13 +97,16 @@ async def chat(request: ChatRequest):
     """Follow-up Q&A — SSE stream."""
     if not request.message.strip():
         raise HTTPException(status_code=400, detail="Message cannot be empty.")
-    session = get_session()
-    gen = session.main_agent.chat(request.message)
-    return StreamingResponse(
-        _stream_sync_generator(gen),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+    try:
+        session = get_session()
+        gen = session.main_agent.chat(request.message)
+        return StreamingResponse(
+            _stream_sync_generator(gen),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+    except ValueError as e:
+        return {"status": "error", "message": str(e)}
 
 
 @router.post("/validate")
@@ -109,20 +115,26 @@ async def validate(request: ValidateRequest):
     content = request.content.strip()
     if not content:
         raise HTTPException(status_code=400, detail="Content cannot be empty.")
-    session = get_session()
-    gen = session.validator_agent.validate(content)
-    return StreamingResponse(
-        _stream_sync_generator(gen),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+    try:
+        session = get_session()
+        gen = session.validator_agent.validate(content)
+        return StreamingResponse(
+            _stream_sync_generator(gen),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+    except ValueError as e:
+        return {"status": "error", "message": str(e)}
 
 
 @router.post("/reset")
 async def reset():
     """Reset conversation history and session state."""
-    reset_session()
-    return {"status": "ok", "message": "Session reset. Conversation history cleared."}
+    try:
+        reset_session()
+        return {"status": "ok", "message": "Session reset. Conversation history cleared."}
+    except ValueError as e:
+        return {"status": "error", "message": str(e)}
 
 
 @router.get("/status")

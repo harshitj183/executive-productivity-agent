@@ -47,6 +47,9 @@ def get_session() -> AgentSession:
 
 def reset_session():
     global _session
+    api_key = os.getenv("GROQ_API_KEY", "")
+    if not api_key:
+        raise ValueError("GROQ_API_KEY environment variable is not set.")
     if _session:
         _session.reset()
     else:
