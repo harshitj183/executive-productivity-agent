@@ -56,6 +56,7 @@ app.add_middleware(
         "http://localhost:5173",
         "http://localhost:3000",
         "http://127.0.0.1:5173",
+        "https://executive-productivity-agent-h74i.onrender.com",
     ],
     allow_credentials=True,
     allow_methods=["*"],
