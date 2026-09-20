@@ -27,6 +27,13 @@ from app.data.source_data import get_all_sources_as_text
 logger = logging.getLogger(__name__)
 
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
+
+# Fallback model chain — if primary hits rate limit, try next
+MODEL_FALLBACK_CHAIN = [
+    "llama-3.1-8b-instant",   # 500K TPD, 6000 TPM
+    "gemma2-9b-it",           # separate quota bucket
+    "llama3-8b-8192",         # another separate quota
+]
 MAX_TOOL_ITERATIONS = 4          # fewer iterations = smaller growing context
 MAX_TOOL_RESULT_CHARS = 500      # cap each tool result to avoid context blowup
 MAX_OUTPUT_TOKENS = 1500         # enough for a full brief
@@ -124,9 +131,11 @@ class MainAgent:
         """
         Core loop: LLM call → tool calls → repeat.
         Tool results are capped so the context never blows up.
+        On 429, automatically tries fallback models.
         """
         iteration = 0
         current_messages = list(messages)
+        active_model = GROQ_MODEL  # may be overridden by fallback
 
         while iteration < MAX_TOOL_ITERATIONS:
             iteration += 1
@@ -135,29 +144,46 @@ class MainAgent:
             yield {
                 "type": "log",
                 "step": f"llm_call_{iteration}",
-                "message": f"[{log_prefix}] LLM call #{self.call_count} (iter {iteration}/{MAX_TOOL_ITERATIONS})"
+                "message": f"[{log_prefix}] LLM call #{self.call_count} (iter {iteration}/{MAX_TOOL_ITERATIONS}) model={active_model}"
             }
 
-            try:
-                response = self.client.chat.completions.create(
-                    model=GROQ_MODEL,
-                    messages=current_messages,
-                    tools=TOOL_DEFINITIONS,
-                    tool_choice="auto",
-                    temperature=0.1,
-                    max_tokens=MAX_OUTPUT_TOKENS,
-                )
-            except Exception as e:
-                err = str(e)
-                logger.error(f"Groq error: {err}")
-                # Friendly 429 message
-                if "429" in err or "rate_limit" in err.lower():
-                    yield {
-                        "type": "error",
-                        "message": "Groq API rate limit hit. Please wait a minute and try again."
-                    }
-                else:
-                    yield {"type": "error", "message": f"LLM call failed: {err}"}
+            # Try current model, with fallback on 429
+            response = None
+            last_err = None
+            models_to_try = [active_model] + [m for m in MODEL_FALLBACK_CHAIN if m != active_model]
+
+            for model in models_to_try:
+                try:
+                    response = self.client.chat.completions.create(
+                        model=model,
+                        messages=current_messages,
+                        tools=TOOL_DEFINITIONS,
+                        tool_choice="auto",
+                        temperature=0.1,
+                        max_tokens=MAX_OUTPUT_TOKENS,
+                    )
+                    active_model = model  # stick with working model
+                    break
+                except Exception as e:
+                    last_err = str(e)
+                    if "429" in last_err or "rate_limit" in last_err.lower():
+                        logger.warning(f"Model {model} rate-limited, trying next...")
+                        yield {
+                            "type": "log",
+                            "step": "model_fallback",
+                            "message": f"Model {model} rate-limited, switching..."
+                        }
+                        continue
+                    # Non-429 error — fail immediately
+                    logger.error(f"Groq error: {last_err}")
+                    yield {"type": "error", "message": f"LLM call failed: {last_err}"}
+                    return ""
+
+            if response is None:
+                yield {
+                    "type": "error",
+                    "message": "All models are rate-limited. Please wait a few minutes and try again."
+                }
                 return ""
 
             msg = response.choices[0].message
@@ -180,7 +206,6 @@ class MainAgent:
                     }
 
                     raw_result = execute_tool(tname, args)
-                    # Cap result to keep context from growing
                     capped = _cap(raw_result)
 
                     yield {
@@ -201,7 +226,7 @@ class MainAgent:
             yield {
                 "type": "log",
                 "step": "complete",
-                "message": f"[{log_prefix}] Done — {iteration} iter, {self.call_count} total calls"
+                "message": f"[{log_prefix}] Done — {iteration} iter, {self.call_count} calls, model={active_model}"
             }
             return final_text
 
@@ -209,21 +234,27 @@ class MainAgent:
         yield {
             "type": "log",
             "step": "max_iter",
-            "message": f"Max iterations reached. Generating final answer..."
+            "message": "Max iterations reached. Generating final answer..."
         }
         current_messages.append({
             "role": "user",
             "content": "Based on everything gathered, produce the final answer now. Be concise."
         })
         self.call_count += 1
-        try:
-            resp = self.client.chat.completions.create(
-                model=GROQ_MODEL,
-                messages=current_messages,
-                temperature=0.1,
-                max_tokens=MAX_OUTPUT_TOKENS,
-            )
-            return resp.choices[0].message.content or ""
-        except Exception as e:
-            logger.error(f"Final answer error: {e}")
-            return ""
+
+        models_to_try = [active_model] + [m for m in MODEL_FALLBACK_CHAIN if m != active_model]
+        for model in models_to_try:
+            try:
+                resp = self.client.chat.completions.create(
+                    model=model,
+                    messages=current_messages,
+                    temperature=0.1,
+                    max_tokens=MAX_OUTPUT_TOKENS,
+                )
+                return resp.choices[0].message.content or ""
+            except Exception as e:
+                if "429" in str(e):
+                    continue
+                logger.error(f"Final answer error: {e}")
+                return ""
+        return ""

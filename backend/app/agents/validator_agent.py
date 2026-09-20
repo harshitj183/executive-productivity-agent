@@ -18,6 +18,7 @@ from app.data.source_data import get_all_sources_as_text
 logger = logging.getLogger(__name__)
 
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
+MODEL_FALLBACK_CHAIN = ["llama-3.1-8b-instant", "gemma2-9b-it", "llama3-8b-8192"]
 
 # Source context trimmed to ~2400 chars (~600 tokens) for validator
 SOURCE_CHAR_LIMIT = 2400
@@ -59,16 +60,28 @@ class ValidatorAgent:
         )
 
         try:
-            response = self.client.chat.completions.create(
-                model=GROQ_MODEL,
-                messages=[
-                    {"role": "system", "content": VALIDATOR_SYSTEM_PROMPT},
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.0,
-                max_tokens=700,
-            )
-            result = response.choices[0].message.content or ""
+            models_to_try = [GROQ_MODEL] + [m for m in MODEL_FALLBACK_CHAIN if m != GROQ_MODEL]
+            result = ""
+            for model in models_to_try:
+                try:
+                    response = self.client.chat.completions.create(
+                        model=model,
+                        messages=[
+                            {"role": "system", "content": VALIDATOR_SYSTEM_PROMPT},
+                            {"role": "user", "content": prompt},
+                        ],
+                        temperature=0.0,
+                        max_tokens=700,
+                    )
+                    result = response.choices[0].message.content or ""
+                    break
+                except Exception as e:
+                    if "429" in str(e):
+                        continue
+                    raise
+            if not result:
+                yield {"type": "error", "message": "All models rate-limited. Please wait a minute."}
+                return
         except Exception as e:
             err = str(e)
             logger.error(f"Validator error: {err}")
