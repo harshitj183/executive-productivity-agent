@@ -74,7 +74,7 @@ class ValidatorAgent:
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.0,
-                max_tokens=3000,
+                max_tokens=800,
             )
             validation_text = response.choices[0].message.content or ""
         except Exception as e:

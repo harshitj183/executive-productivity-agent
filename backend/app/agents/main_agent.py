@@ -239,7 +239,7 @@ class MainAgent:
             model=GROQ_MODEL,
             messages=current_messages,
             temperature=0.1,
-            max_tokens=4096,
+            max_tokens=800,
         )
         final_text = response.choices[0].message.content or ""
         return final_text
