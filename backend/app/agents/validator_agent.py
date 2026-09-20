@@ -1,15 +1,12 @@
 """
-Validator Agent — checks the Main Agent's output for:
-1. Factual grounding (every claim must trace back to source data)
-2. Hallucinations (invented facts, dates, names, or ownership)
-3. Missing items (commitments present in the source data but absent from the brief)
-4. Classification errors (wrong MY_ACTION / WAITING_ON_OTHERS / AMBIGUOUS label)
+Validator Agent — fact-checks the main agent's output against source data.
 
-This runs AFTER the main agent produces output. It gets the same source data
-and the main agent's output, then returns a structured validation report.
+Token budget: keeps total input under 3500 tokens.
+- System prompt: ~150 tokens
+- Source summary: capped at ~600 tokens  
+- Agent output: capped at ~300 tokens
 """
 
-import json
 import logging
 import os
 from typing import Generator
@@ -22,48 +19,43 @@ logger = logging.getLogger(__name__)
 
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
 
-VALIDATOR_SYSTEM_PROMPT = """You are a strict fact-checker for an AI executive assistant.
-Your sole job is to validate whether a given response about commitments and deadlines is actually grounded in the source data.
+# Source context trimmed to ~2400 chars (~600 tokens) for validator
+SOURCE_CHAR_LIMIT = 2400
+AGENT_OUTPUT_CHAR_LIMIT = 1200
 
-You will receive:
-1. The original source data (meeting transcript, emails, calendar, voice notes)
-2. The AI assistant's response to validate
+VALIDATOR_SYSTEM_PROMPT = """You are a fact-checker for an AI executive assistant output.
+Check the response against the source data. Return a concise report:
 
-Your job:
-- Check every commitment, date, deadline, and ownership claim against the source data
-- Flag anything that appears to be invented (not traceable to any source)
-- Identify anything important that was in the source data but missing from the response
-- Flag any misclassifications (wrong owner, wrong date, wrong status)
+VERDICT: PASS | PARTIAL | FAIL
+GROUNDED: (list claims that are correctly sourced)
+ISSUES: (invented facts, wrong dates, wrong ownership, hallucinations)
+MISSING: (important commitments from source data that were omitted)
+SUMMARY: (1-2 sentences)
 
-Output a structured validation report with:
-- VERDICT: PASS | FAIL | PARTIAL
-- GROUNDED_ITEMS: List of claims that are correctly sourced
-- ISSUES: List of specific problems found (hallucinations, wrong dates, wrong owners, missing items)
-- MISSING_ITEMS: List of commitments in the source data that were omitted
-- SUMMARY: One paragraph summary of overall quality
-
-Be precise and cite specific source lines when flagging issues.
 Today is Monday, 21 September 2026."""
 
 
 class ValidatorAgent:
     def __init__(self, api_key: str):
         self.client = Groq(api_key=api_key)
-        self.source_context = get_all_sources_as_text()
+        # Trim source context to stay under token limit
+        full = get_all_sources_as_text()
+        self.source_context = full[:SOURCE_CHAR_LIMIT] + ("…" if len(full) > SOURCE_CHAR_LIMIT else "")
         self.call_count = 0
 
     def validate(self, agent_output: str) -> Generator[dict, None, None]:
-        """
-        Validate the main agent's output against source data.
-        Yields log events and the final validation report.
-        """
-        yield {"type": "log", "step": "validator_start", "message": "Validator agent starting..."}
+        yield {"type": "log", "step": "validator_start", "message": "Validator checking output..."}
+
+        # Cap agent output too
+        output = agent_output[:AGENT_OUTPUT_CHAR_LIMIT]
+        if len(agent_output) > AGENT_OUTPUT_CHAR_LIMIT:
+            output += "…[truncated]"
 
         self.call_count += 1
         prompt = (
-            f"=== SOURCE DATA ===\n{self.source_context}\n\n"
-            f"=== AI ASSISTANT RESPONSE TO VALIDATE ===\n{agent_output}\n\n"
-            "Please validate the response against the source data and produce a structured validation report."
+            f"SOURCE DATA:\n{self.source_context}\n\n"
+            f"AGENT RESPONSE:\n{output}\n\n"
+            "Validate the agent response against the source data."
         )
 
         try:
@@ -71,20 +63,24 @@ class ValidatorAgent:
                 model=GROQ_MODEL,
                 messages=[
                     {"role": "system", "content": VALIDATOR_SYSTEM_PROMPT},
-                    {"role": "user", "content": prompt}
+                    {"role": "user", "content": prompt},
                 ],
                 temperature=0.0,
-                max_tokens=800,
+                max_tokens=700,
             )
-            validation_text = response.choices[0].message.content or ""
+            result = response.choices[0].message.content or ""
         except Exception as e:
-            logger.error(f"Validator API error: {e}")
-            yield {"type": "error", "message": f"Validator failed: {str(e)}"}
+            err = str(e)
+            logger.error(f"Validator error: {err}")
+            if "429" in err or "rate_limit" in err.lower():
+                yield {"type": "error", "message": "Rate limit hit. Please wait a minute and retry."}
+            else:
+                yield {"type": "error", "message": f"Validator failed: {err}"}
             return
 
         yield {
             "type": "log",
             "step": "validator_complete",
-            "message": f"Validator completed. Total LLM calls: {self.call_count}"
+            "message": f"Validator done. Call #{self.call_count}"
         }
-        yield {"type": "validation_result", "content": validation_text}
+        yield {"type": "validation_result", "content": result}
