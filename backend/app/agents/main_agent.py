@@ -15,7 +15,7 @@ from app.data.source_data import get_all_sources_as_text
 
 logger = logging.getLogger(__name__)
 
-GROQ_MODEL = os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
 MAX_TOOL_ITERATIONS = 6
 
 # ── Kept under 400 tokens ────────────────────────────────────────────────────

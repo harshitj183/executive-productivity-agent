@@ -20,7 +20,7 @@ from app.data.source_data import get_all_sources_as_text
 
 logger = logging.getLogger(__name__)
 
-GROQ_MODEL = os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
 
 VALIDATOR_SYSTEM_PROMPT = """You are a strict fact-checker for an AI executive assistant.
 Your sole job is to validate whether a given response about commitments and deadlines is actually grounded in the source data.
