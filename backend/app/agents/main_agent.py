@@ -26,13 +26,13 @@ from app.data.source_data import get_all_sources_as_text
 
 logger = logging.getLogger(__name__)
 
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
+GROQ_MODEL = "llama-3.1-8b-instant"  # hardcoded — do not change to env var
 
-# Fallback model chain — if primary hits rate limit, try next
+# Fallback chain if primary model hits rate limit
 MODEL_FALLBACK_CHAIN = [
-    "llama-3.1-8b-instant",   # 500K TPD, 6000 TPM
-    "gemma2-9b-it",           # separate quota bucket
-    "llama3-8b-8192",         # another separate quota
+    "llama-3.1-8b-instant",
+    "gemma2-9b-it",
+    "llama3-8b-8192",
 ]
 MAX_TOOL_ITERATIONS = 4          # fewer iterations = smaller growing context
 MAX_TOOL_RESULT_CHARS = 500      # cap each tool result to avoid context blowup

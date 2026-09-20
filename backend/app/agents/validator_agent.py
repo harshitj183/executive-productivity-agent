@@ -17,7 +17,7 @@ from app.data.source_data import get_all_sources_as_text
 
 logger = logging.getLogger(__name__)
 
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
+GROQ_MODEL = "llama-3.1-8b-instant"  # hardcoded
 MODEL_FALLBACK_CHAIN = ["llama-3.1-8b-instant", "gemma2-9b-it", "llama3-8b-8192"]
 
 # Source context trimmed to ~2400 chars (~600 tokens) for validator
