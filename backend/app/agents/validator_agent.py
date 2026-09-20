@@ -17,8 +17,8 @@ from app.data.source_data import get_all_sources_as_text
 
 logger = logging.getLogger(__name__)
 
-GROQ_MODEL = "llama-3.1-8b-instant"  # hardcoded
-MODEL_FALLBACK_CHAIN = ["llama-3.1-8b-instant", "gemma2-9b-it", "llama3-8b-8192"]
+GROQ_MODEL = "openai/gpt-oss-120b"  # hardcoded
+MODEL_FALLBACK_CHAIN = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"]
 
 # Source context trimmed to ~2400 chars (~600 tokens) for validator
 SOURCE_CHAR_LIMIT = 2400

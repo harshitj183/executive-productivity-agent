@@ -1,22 +1,16 @@
 """
 Main Agent — Executive Productivity Agent for Arjun Malhotra.
 
-Token budget (llama-3.1-8b-instant free tier):
-  - 6000 TPM (tokens per minute)
-  - 500K TPD (tokens per day)
-  - 14400 RPD (requests per day)
+Architecture: Source data is embedded directly in the first user message.
+Tools are available for targeted follow-up lookups but the core data
+is always present — the agent cannot "not have" the data.
 
-Strategy: keep total context well under 4000 tokens per call.
-  - system prompt  ~150 tokens
-  - user message   ~100 tokens
-  - tool defs      ~500 tokens
-  - tool results   capped at 400 chars each (~100 tokens each)
-  - max iterations  4 (fewer tool round-trips = smaller context)
+Token budget (gpt-oss-20b / qwen fallback):
+  ~2000 tokens input per call, 1500 output max.
 """
 
 import json
 import logging
-import os
 from typing import Generator
 
 from groq import Groq
@@ -26,43 +20,89 @@ from app.data.source_data import get_all_sources_as_text
 
 logger = logging.getLogger(__name__)
 
-GROQ_MODEL = "llama-3.1-8b-instant"  # hardcoded — do not change to env var
+# ── Model config ──────────────────────────────────────────────────────────────
+PRIMARY_MODEL   = "openai/gpt-oss-120b"   # hardcoded — best reasoning, 131K ctx
+FALLBACK_MODELS = ["openai/gpt-oss-20b", "qwen/qwen3.8-27b"]
 
-# Fallback chain if primary model hits rate limit
-MODEL_FALLBACK_CHAIN = [
-    "llama-3.1-8b-instant",
-    "gemma2-9b-it",
-    "llama3-8b-8192",
-]
-MAX_TOOL_ITERATIONS = 4          # fewer iterations = smaller growing context
-MAX_TOOL_RESULT_CHARS = 500      # cap each tool result to avoid context blowup
-MAX_OUTPUT_TOKENS = 1500         # enough for a full brief
+MAX_TOOL_ITERATIONS = 3
+MAX_OUTPUT_TOKENS   = 8000   # gpt-oss models use internal thinking tokens, need headroom
+TOOL_RESULT_CAP     = 600
 
-# ── System prompt (~150 tokens) ───────────────────────────────────────────────
+
+# ── Prompts ───────────────────────────────────────────────────────────────────
 SYSTEM_PROMPT = """You are an Executive Productivity Agent for Arjun Malhotra (VP Sales, Veridian Corp).
 Week: Mon 21 – Fri 25 Sep 2026. Today = Mon 21 Sep 2026.
 
-RULES (follow strictly):
-1. Never invent facts. If ownership is unclear, flag it — do NOT guess.
-2. Every commitment must cite its source (meeting / email thread / voice note).
-3. Classify each item: MY_ACTION | WAITING_ON_OTHERS | AMBIGUOUS.
-4. For rescheduled items: show final/latest date only, note previous dates briefly.
-5. Use tools to look up source data before answering.
+RULES:
+1. Only use facts from the SOURCE DATA provided. Never invent anything.
+2. Cite source for every item (meeting / email thread / voice note date).
+3. Classify: MY_ACTION | WAITING_ON_OTHERS | AMBIGUOUS.
+4. Rescheduled items: show final date only + note history.
+5. Mumbai lease = AMBIGUOUS (ownership not confirmed).
 
-OUTPUT FORMAT for the daily brief:
-## My Actions  ← overdue first, then by deadline
+BRIEF FORMAT:
+## My Actions  (overdue first, then by date)
 ## Waiting on Others
-## Flagged / Needs Attention  ← unclear ownership, risks"""
+## Flagged / Needs Attention"""
 
-# ── Brief prompt (~80 tokens) ─────────────────────────────────────────────────
-BRIEF_GENERATION_PROMPT = """Generate Arjun's daily brief. Use tools to find ALL commitments from emails, meeting transcript, and voice notes. Check deadlines. Track shifted dates (vendor list: Mon→Tue→Wed). Flag Mumbai lease as AMBIGUOUS. Cite source + deadline per item."""
+BRIEF_PROMPT_TEMPLATE = """Here is all source data for Arjun's week:
+
+{source_data}
+
+---
+Using ONLY the data above, generate the complete daily brief.
+- List every commitment, classify it, cite source, include deadline.
+- Track date shifts (vendor list changed Mon→Tue→Wed).
+- Flag Mumbai lease as AMBIGUOUS.
+- Do not invent anything not in the data."""
 
 
-def _cap(text: str, limit: int = MAX_TOOL_RESULT_CHARS) -> str:
-    """Truncate tool result to keep context size under control."""
-    if len(text) <= limit:
+def _call_with_fallback(
+    client: Groq,
+    messages: list[dict],
+    tools: list | None = None,
+    max_tokens: int = MAX_OUTPUT_TOKENS,
+) -> tuple[object | None, str]:
+    """
+    Try PRIMARY_MODEL then FALLBACK_MODELS.
+    Returns (response, model_used) or (None, "") on all failures.
+    """
+    for model in [PRIMARY_MODEL] + FALLBACK_MODELS:
+        kwargs: dict = {
+            "model": model,
+            "messages": messages,
+            "temperature": 0.1,
+            "max_tokens": max_tokens,
+        }
+        if tools:
+            kwargs["tools"] = tools
+            kwargs["tool_choice"] = "auto"
+        try:
+            resp = client.chat.completions.create(**kwargs)
+            return resp, model
+        except Exception as e:
+            err = str(e)
+            if "429" in err or "rate_limit" in err.lower():
+                logger.warning(f"{model} rate-limited, trying next")
+                continue
+            if "400" in err and "tool_use_failed" in err:
+                # Model tried invalid tool — retry same model without tools
+                try:
+                    kwargs.pop("tools", None)
+                    kwargs.pop("tool_choice", None)
+                    resp = client.chat.completions.create(**kwargs)
+                    return resp, model
+                except Exception:
+                    continue
+            logger.error(f"Groq error on {model}: {e}")
+            return None, ""
+    return None, ""
+
+
+def _cap(text: str) -> str:
+    if len(text) <= TOOL_RESULT_CAP:
         return text
-    return text[:limit] + f"…[+{len(text)-limit} chars truncated]"
+    return text[:TOOL_RESULT_CAP] + f"…[{len(text)-TOOL_RESULT_CAP} more chars]"
 
 
 class MainAgent:
@@ -71,190 +111,142 @@ class MainAgent:
         self.conversation_history: list[dict] = []
         self.source_context = get_all_sources_as_text()
         self.call_count = 0
-        self._initialized = False
+        self._brief_done = False
 
     def reset_conversation(self):
         self.conversation_history = []
-        self._initialized = False
-
-    def _build_messages(self, user_message: str) -> list[dict]:
-        """Build messages for follow-up chat. Context injected once."""
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-        if not self._initialized:
-            messages.append({
-                "role": "user",
-                "content": f"SOURCE DATA:\n{self.source_context}\n\n---\n{user_message}"
-            })
-            self._initialized = True
-        else:
-            # Keep history but prune to last 6 turns max (cost control)
-            recent = self.conversation_history[-12:]
-            messages.extend(recent)
-            messages.append({"role": "user", "content": user_message})
-        return messages
+        self._brief_done = False
 
     def generate_brief(self) -> Generator[dict, None, None]:
-        yield {"type": "log", "step": "init", "message": "Starting brief generation..."}
+        """Generate the daily brief with source data embedded directly."""
+        yield {"type": "log", "step": "init", "message": "Reading source data..."}
 
-        # Brief: agent uses tools, no large context blob in the message
+        # Embed source data directly — agent always has it
+        brief_prompt = BRIEF_PROMPT_TEMPLATE.format(source_data=self.source_context)
+
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": BRIEF_GENERATION_PROMPT},
+            {"role": "user",   "content": brief_prompt},
         ]
-        self._initialized = True
 
-        result = yield from self._run_agentic_loop(messages, "Brief")
+        result = yield from self._agentic_loop(messages, "Brief")
         if not result:
-            result = ""
+            result = "Could not generate brief — please try again."
 
-        self.conversation_history.append({"role": "user", "content": BRIEF_GENERATION_PROMPT})
+        self._brief_done = True
+        self.conversation_history.append({"role": "user",      "content": "Generate my daily brief."})
         self.conversation_history.append({"role": "assistant", "content": result})
 
         yield {"type": "result", "content": result}
 
     def chat(self, user_message: str) -> Generator[dict, None, None]:
-        yield {"type": "log", "step": "chat_start", "message": f"Processing: {user_message[:60]}..."}
+        """Follow-up Q&A. Source data embedded on first chat call."""
+        yield {"type": "log", "step": "chat", "message": f"Processing: {user_message[:60]}..."}
 
-        messages = self._build_messages(user_message)
-        result = yield from self._run_agentic_loop(messages, "Chat")
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+
+        if not self._brief_done:
+            # First interaction without brief — include source data
+            messages.append({
+                "role": "user",
+                "content": f"{BRIEF_PROMPT_TEMPLATE.format(source_data=self.source_context)}\n\nAlso: {user_message}"
+            })
+            self._brief_done = True
+        else:
+            # Has brief context — use history
+            messages.extend(self.conversation_history[-10:])
+            messages.append({"role": "user", "content": user_message})
+
+        result = yield from self._agentic_loop(messages, "Chat")
         if not result:
-            result = ""
+            result = "Could not process your question — please try again."
 
-        self.conversation_history.append({"role": "user", "content": user_message})
+        self.conversation_history.append({"role": "user",      "content": user_message})
         self.conversation_history.append({"role": "assistant", "content": result})
 
         yield {"type": "result", "content": result}
 
-    def _run_agentic_loop(
-        self, messages: list[dict], log_prefix: str = ""
+    def _agentic_loop(
+        self, messages: list[dict], prefix: str
     ) -> Generator[dict, None, str]:
-        """
-        Core loop: LLM call → tool calls → repeat.
-        Tool results are capped so the context never blows up.
-        On 429, automatically tries fallback models.
-        """
-        iteration = 0
-        current_messages = list(messages)
-        active_model = GROQ_MODEL  # may be overridden by fallback
+        """LLM → tool calls → repeat → final text. Source data already in context."""
+        current = list(messages)
+        used_model = PRIMARY_MODEL
 
-        while iteration < MAX_TOOL_ITERATIONS:
-            iteration += 1
+        for iteration in range(1, MAX_TOOL_ITERATIONS + 1):
             self.call_count += 1
 
             yield {
                 "type": "log",
-                "step": f"llm_call_{iteration}",
-                "message": f"[{log_prefix}] LLM call #{self.call_count} (iter {iteration}/{MAX_TOOL_ITERATIONS}) model={active_model}"
+                "step": f"iter_{iteration}",
+                "message": f"[{prefix}] call #{self.call_count} (iter {iteration})"
             }
 
-            # Try current model, with fallback on 429
-            response = None
-            last_err = None
-            models_to_try = [active_model] + [m for m in MODEL_FALLBACK_CHAIN if m != active_model]
+            resp, used_model = _call_with_fallback(
+                self.client, current, tools=TOOL_DEFINITIONS
+            )
 
-            for model in models_to_try:
-                try:
-                    response = self.client.chat.completions.create(
-                        model=model,
-                        messages=current_messages,
-                        tools=TOOL_DEFINITIONS,
-                        tool_choice="auto",
-                        temperature=0.1,
-                        max_tokens=MAX_OUTPUT_TOKENS,
-                    )
-                    active_model = model  # stick with working model
-                    break
-                except Exception as e:
-                    last_err = str(e)
-                    if "429" in last_err or "rate_limit" in last_err.lower():
-                        logger.warning(f"Model {model} rate-limited, trying next...")
-                        yield {
-                            "type": "log",
-                            "step": "model_fallback",
-                            "message": f"Model {model} rate-limited, switching..."
-                        }
-                        continue
-                    # Non-429 error — fail immediately
-                    logger.error(f"Groq error: {last_err}")
-                    yield {"type": "error", "message": f"LLM call failed: {last_err}"}
-                    return ""
-
-            if response is None:
+            if resp is None:
                 yield {
                     "type": "error",
-                    "message": "All models are rate-limited. Please wait a few minutes and try again."
+                    "message": "All models rate-limited. Please wait 1–2 minutes and try again."
                 }
                 return ""
 
-            msg = response.choices[0].message
+            msg = resp.choices[0].message
 
-            if msg.tool_calls:
-                current_messages.append(msg)
+            # No tool calls → done
+            if not msg.tool_calls:
+                text = msg.content or ""
+                yield {
+                    "type": "log",
+                    "step": "done",
+                    "message": f"[{prefix}] complete — {iteration} iter, model={used_model}"
+                }
+                return text
 
-                for tc in msg.tool_calls:
-                    tname = tc.function.name
-                    try:
-                        args = json.loads(tc.function.arguments)
-                    except json.JSONDecodeError:
-                        args = {}
+            # Execute tool calls
+            current.append(msg)
+            for tc in msg.tool_calls:
+                tname = tc.function.name
+                try:
+                    args = json.loads(tc.function.arguments)
+                except json.JSONDecodeError:
+                    args = {}
 
-                    yield {
-                        "type": "tool_call",
-                        "tool": tname,
-                        "args": args,
-                        "message": f"→ {tname}({json.dumps(args)})"
-                    }
+                yield {
+                    "type": "tool_call",
+                    "tool": tname,
+                    "args": args,
+                    "message": f"→ {tname}({json.dumps(args)})"
+                }
 
-                    raw_result = execute_tool(tname, args)
-                    capped = _cap(raw_result)
+                raw = execute_tool(tname, args)
+                capped = _cap(raw)
 
-                    yield {
-                        "type": "tool_result",
-                        "tool": tname,
-                        "message": f"← {tname}: {len(raw_result)} chars"
-                    }
+                yield {
+                    "type": "tool_result",
+                    "tool": tname,
+                    "message": f"← {tname}: {len(raw)} chars"
+                }
 
-                    current_messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": capped,
-                    })
-                continue
+                current.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": capped,
+                })
 
-            # No tool calls → final answer
-            final_text = msg.content or ""
-            yield {
-                "type": "log",
-                "step": "complete",
-                "message": f"[{log_prefix}] Done — {iteration} iter, {self.call_count} calls, model={active_model}"
-            }
-            return final_text
-
-        # Hit iteration cap → force final answer without tools
-        yield {
-            "type": "log",
-            "step": "max_iter",
-            "message": "Max iterations reached. Generating final answer..."
-        }
-        current_messages.append({
+        # Max iterations — generate final answer without tool calls
+        yield {"type": "log", "step": "finalize", "message": "Finalizing answer..."}
+        current.append({
             "role": "user",
-            "content": "Based on everything gathered, produce the final answer now. Be concise."
+            "content": "Now write the complete daily brief based on all data gathered. No more tool calls needed."
         })
         self.call_count += 1
 
-        models_to_try = [active_model] + [m for m in MODEL_FALLBACK_CHAIN if m != active_model]
-        for model in models_to_try:
-            try:
-                resp = self.client.chat.completions.create(
-                    model=model,
-                    messages=current_messages,
-                    temperature=0.1,
-                    max_tokens=MAX_OUTPUT_TOKENS,
-                )
-                return resp.choices[0].message.content or ""
-            except Exception as e:
-                if "429" in str(e):
-                    continue
-                logger.error(f"Final answer error: {e}")
-                return ""
+        resp, _ = _call_with_fallback(
+            self.client, current, tools=None  # no tools = can't call them
+        )
+        if resp:
+            return resp.choices[0].message.content or ""
         return ""
